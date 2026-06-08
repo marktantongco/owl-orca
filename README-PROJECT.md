@@ -19,7 +19,7 @@
 ## 📸 Architecture Schematic
 
 <p align="center">
-  <img src="docs/assets/architecture-schematic.png" alt="OWL-ORCA Architecture Schematic" width="100%">
+  <img src="assets/architecture-schematic.png" alt="OWL-ORCA Architecture Schematic" width="100%">
 </p>
 
 *The OWL-ORCA system routes AI requests through a local proxy and router stack, racing multiple free-tier providers simultaneously. The first provider to respond wins — delivering the lowest possible latency without any cost to the user.*
@@ -29,7 +29,7 @@
 ## 🎯 Feature Infographic
 
 <p align="center">
-  <img src="docs/assets/infographic-illustration.png" alt="OWL-ORCA Feature Infographic" width="100%">
+  <img src="assets/infographic-illustration.png" alt="OWL-ORCA Feature Infographic" width="100%">
 </p>
 
 ---
@@ -274,7 +274,7 @@ Step 6 writes these Python modules into `~/.owl-agent/bin/` and `~/.owl-agent/bi
 ## ⏱️ Version Timeline
 
 <p align="center">
-  <img src="docs/assets/version-timeline.png" alt="OWL-ORCA Version Timeline" width="100%">
+  <img src="assets/version-timeline.png" alt="OWL-ORCA Version Timeline" width="100%">
 </p>
 
 ### Historical Changes
@@ -489,38 +489,6 @@ systemctl --user reload orca-router.service
 1. Extend `token_manager.py` with a new auth class (e.g., `MyProviderAuth`)
 2. Add the provider name to the `authenticate` command choices
 3. The token will be automatically loaded by the router's `_load_tokens()` method
-
----
-
-## 🌐 Web App (Landing Page)
-
-This repo also contains the **OWL-ORCA landing page** — a mobile-first Next.js 16 app with Kinetic Autopoiesis UI, deployed on Vercel.
-
-**Live site**: [owl-orca-web.vercel.app](https://owl-orca-web.vercel.app)
-
-### Design System
-
-| Layer | Ratio | Implementation |
-|-------|-------|---------------|
-| Kinetic Spatial | 40% | Floating particles, animated owl eyes, race track animations, parallax drift |
-| Autopoietic Canvas | 35% | Breathing orbs, morphing blobs, organic gradient shifts |
-| Glass Depth | 25% | Frosted glass cards, layered blur, depth shadows |
-
-### Local Development
-
-```bash
-cd owl-orca-web  # (this repo root)
-npm install
-npm run dev      # Open http://localhost:3000
-```
-
-### Tech Stack
-
-- Next.js 16 (App Router, TypeScript 5)
-- Tailwind CSS 4 with custom animations
-- shadcn/ui components
-- Framer Motion for scroll reveals
-- Vercel deployment
 
 ---
 
