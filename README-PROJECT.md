@@ -19,7 +19,7 @@
 ## 📸 Architecture Schematic
 
 <p align="center">
-  <img src="docs/assets/architecture-schematic.png" alt="OWL-ORCA Architecture Schematic" width="100%">
+  <img src="assets/architecture-schematic.png" alt="OWL-ORCA Architecture Schematic" width="100%">
 </p>
 
 *The OWL-ORCA system routes AI requests through a local proxy and router stack, racing multiple free-tier providers simultaneously. The first provider to respond wins — delivering the lowest possible latency without any cost to the user.*
@@ -29,7 +29,7 @@
 ## 🎯 Feature Infographic
 
 <p align="center">
-  <img src="docs/assets/infographic-illustration.png" alt="OWL-ORCA Feature Infographic" width="100%">
+  <img src="assets/infographic-illustration.png" alt="OWL-ORCA Feature Infographic" width="100%">
 </p>
 
 ---
@@ -48,6 +48,10 @@ OWL-ORCA is a **self-hosted AI gateway** that aggregates free-tier AI providers 
 - **Zero-Downtime Installs**: Atomic file writes prevent IDE file watcher crashes. Every file update uses write-to-temp + `mv` for inode swap.
 
 ---
+
+## 📐 System Architecture
+
+### Request Flow
 
 ```
 ┌─────────────┐     ┌──────────────────┐     ┌──────────────────────────────────────┐     ┌──────────────────┐
@@ -270,7 +274,7 @@ Step 6 writes these Python modules into `~/.owl-agent/bin/` and `~/.owl-agent/bi
 ## ⏱️ Version Timeline
 
 <p align="center">
-  <img src="docs/assets/version-timeline.png" alt="OWL-ORCA Version Timeline" width="100%">
+  <img src="assets/version-timeline.png" alt="OWL-ORCA Version Timeline" width="100%">
 </p>
 
 ### Historical Changes
@@ -435,55 +439,14 @@ owl-proxy curl https://api.example.com
 
 ---
 
-## 🔧 Utilities
+## 🔐 Security Considerations
 
-### kiro-cli Download Script
-
-`bin/get-kiro-cli.sh` downloads the `kiro-cli` native binary from `prod.download.cli.kiro.dev` using manifest-based version resolution:
-
-```bash
-./bin/get-kiro-cli.sh
-```
-
-The script automatically detects the system architecture and libc variant (`musl` vs `glibc`) to select the correct package from the manifest.
-
----
-
-## 🌐 Web App (Landing Page)
-
-This repo includes a **Next.js landing page** at the repo root — a kinetic autopoiesis UI with stream racing visualization. Deployed on Vercel.
-
-**Live site**: [owl-orca-web.vercel.app](https://owl-orca-web.vercel.app)
-
-### Design System
-
-| Layer | Ratio | Implementation |
-|-------|-------|---------------|
-| Kinetic Spatial | 40% | Floating particles, animated owl eyes, race track animations, parallax drift |
-| Autopoietic Canvas | 35% | Breathing orbs, morphing blobs, organic gradient shifts |
-| Glass Depth | 25% | Frosted glass cards, layered blur, depth shadows |
-
-### Quick Start
-
-```bash
-npm install
-npm run dev      # opens http://localhost:3000
-```
-
-### Build for Production
-
-```bash
-npm run build
-npm start        # production server on port 3000
-```
-
-### Tech Stack
-
-- Next.js 16 (App Router, TypeScript 5)
-- Tailwind CSS 4 with custom animations
-- shadcn/ui components
-- Framer Motion for scroll reveals
-- Vercel deployment
+- **Tokens encrypted at rest**: OAuth tokens stored in `tokens.enc` using Fernet symmetric encryption with auto-generated keys
+- **Secure file permissions**: Config directory (0700), token files (0600), encryption keys (0600)
+- **Local-only binding**: All services bind to `127.0.0.1` (localhost only) by default
+- **No telemetry**: Zero outbound analytics, tracking, or phone-home behavior
+- **Atomic writes**: All file operations use write-to-temp + rename to prevent corruption
+- **Bypass domains**: Forward proxy automatically bypasses provider domains to avoid routing loops
 
 ---
 
