@@ -239,12 +239,13 @@ if [ "${UNINSTALL:-}" == "true" ] || [ "${UNINSTALL:-}" == "force" ]; then
         # Backup before modification
         cp "$OPENCODE_CONFIG" "${OPENCODE_CONFIG}.bak.$(date +%s)"
 
-        python3 << 'PYEOF'
+        OWL_INSTALL_DIR="$INSTALL_DIR" python3 << 'PYEOF'
 import json, os, sys
 
 # FIX (B11): Import from shared jsonc_utils module instead of duplicating
 # the ~70-line strip_jsonc_comments function inline.
-sys.path.insert(0, os.path.expanduser("~/.owl-agent/bin/utils"))
+_owl_install = os.environ.get("OWL_INSTALL_DIR", os.path.expanduser("~/.owl-agent"))
+sys.path.insert(0, os.path.join(_owl_install, "bin", "utils"))
 try:
     from jsonc_utils import load_jsonc, save_json_atomic
 except ImportError:
@@ -360,6 +361,15 @@ check_deps() {
 
 if [ "${DRY_RUN:-}" != "true" ]; then
     check_deps
+
+    # -- D-Bus check (systemd user services need the session bus) --
+    if ! systemctl --user daemon-reload 2>/dev/null; then
+        log_warn "systemd user bus unavailable ('systemctl --user' failed)."
+        log_info "Services will NOT auto-start. After install, run:"
+        log_info "  export DBUS_SESSION_BUS_ADDRESS=\"unix:path=\$(loginctl show-user \$USER -p Display -P Display)\""
+        log_info "  systemctl --user daemon-reload"
+        log_info "  systemctl --user start orca-router.service owl-proxy.service kiro-gateway.service"
+    fi
 
     # -- OS Detection --
     PKG_MANAGER=""
@@ -1167,7 +1177,7 @@ BYPASS_EXACT = {
 }
 BYPASS_SUFFIX = (
     ".nvidia.com", ".opencode.ai", ".amazonaws.com",
-    ".kiro.dev", ".githubcopilot.com", ".antigravity.ai",
+    ".kiro.dev", ".githubcopilot.com",     ".googleapis.com",
 )
 
 _conn_semaphore = None
@@ -1804,14 +1814,38 @@ KEY_FILE = CONFIG_DIR / ".key"
 PROVIDERS_FILE = CONFIG_DIR / "providers.json"
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
+_env_file = _install_dir / ".env"
+if _env_file.exists():
+    with open(_env_file) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _v = _line.split("=", 1)
+                os.environ.setdefault(_k.strip(), _v.strip())
+
 # -- Constants --
 GITHUB_CLIENT_ID = "Iv1.b507a08c87ecfe98"
 GITHUB_DEVICE_URL = "https://github.com/login/device/code"
 GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token"
 COPILOT_API_BASE = "https://api.githubcopilot.com"
-ANTIGRAVITY_AUTH_URL = "https://auth.antigravity.ai/oauth/authorize"
-ANTIGRAVITY_TOKEN_URL = "https://auth.antigravity.ai/oauth/token"
-ANTIGRAVITY_API_BASE = "https://api.antigravity.ai"
+# Antigravity = Google Cloud Code Assist OAuth2
+ANTIGRAVITY_CLIENT_ID = os.getenv("ANTIGRAVITY_CLIENT_ID")
+ANTIGRAVITY_CLIENT_SECRET = os.getenv("ANTIGRAVITY_CLIENT_SECRET")
+if not ANTIGRAVITY_CLIENT_ID or not ANTIGRAVITY_CLIENT_SECRET:
+    print(f"{YELLOW}⚠ ANTIGRAVITY_CLIENT_ID / ANTIGRAVITY_CLIENT_SECRET not set{RED}")
+    print(f"{YELLOW}  Google OAuth-based features (antigravity) will be unavailable.{NC}")
+    print(f"{YELLOW}  Set them in your environment or ~/.owl-agent/.env to enable.{NC}")
+ANTIGRAVITY_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+ANTIGRAVITY_TOKEN_URL = "https://oauth2.googleapis.com/token"
+ANTIGRAVITY_API_BASE = "https://cloudcode-pa.googleapis.com"
+ANTIGRAVITY_REDIRECT_URI = "http://localhost:51121/oauth-callback"
+ANTIGRAVITY_SCOPES = [
+    "https://www.googleapis.com/auth/cloud-platform",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+    "https://www.googleapis.com/auth/cclog",
+    "https://www.googleapis.com/auth/experimentsandconfigs",
+]
 PROXY_URL = os.getenv("OWL_PROXY_URL", "http://127.0.0.1:60000")
 
 # -- ANSI --
@@ -1934,7 +1968,8 @@ class DeviceFlowAuth:
         async with httpx.AsyncClient(proxy=self.proxy_url, timeout=30) as client:
             resp = await client.post(GITHUB_DEVICE_URL, data=params)
             resp.raise_for_status()
-            d = resp.json()
+            from urllib.parse import parse_qs
+            d = {k: v[0] for k, v in parse_qs(resp.text).items()}
             return d["user_code"], d["verification_uri"], d.get("device_code", ""), int(d.get("expires_in", 900))
 
     async def poll_for_token(self, device_code: str, interval: int = 5, timeout: int = 300) -> TokenData:
@@ -1989,7 +2024,7 @@ class APIKeyAuth:
 
 
 class AntigravityOAuth:
-    """Antigravity OAuth with PKCE support."""
+    """Google Antigravity (Cloud Code Assist) OAuth with PKCE support."""
 
     def __init__(self, proxy_url: str = PROXY_URL):
         self.proxy_url = proxy_url
@@ -2003,21 +2038,23 @@ class AntigravityOAuth:
         challenge_b64 = base64.urlsafe_b64encode(challenge).rstrip(b"=").decode()
         return self._verifier, challenge_b64
 
-    def get_auth_url(self, redirect_uri: str = "http://localhost:3456/callback") -> str:
+    def get_auth_url(self, redirect_uri: str = ANTIGRAVITY_REDIRECT_URI) -> str:
         _, challenge = self._generate_pkce()
         self._state = secrets.token_hex(16)
         params = {
-            "client_id": "antigravity-free",
+            "client_id": ANTIGRAVITY_CLIENT_ID,
             "redirect_uri": redirect_uri,
             "response_type": "code",
-            "scope": "read write",
+            "scope": " ".join(ANTIGRAVITY_SCOPES),
             "code_challenge": challenge,
             "code_challenge_method": "S256",
             "state": self._state,
+            "access_type": "offline",
+            "prompt": "consent",
         }
         return f"{ANTIGRAVITY_AUTH_URL}?{urlencode(params)}"
 
-    async def exchange_code(self, code: str, redirect_uri: str = "http://localhost:3456/callback") -> TokenData:
+    async def exchange_code(self, code: str, redirect_uri: str = ANTIGRAVITY_REDIRECT_URI) -> TokenData:
         async with httpx.AsyncClient(proxy=self.proxy_url, timeout=30) as client:
             resp = await client.post(
                 ANTIGRAVITY_TOKEN_URL,
@@ -2025,7 +2062,8 @@ class AntigravityOAuth:
                     "grant_type": "authorization_code",
                     "code": code,
                     "redirect_uri": redirect_uri,
-                    "client_id": "antigravity-free",
+                    "client_id": ANTIGRAVITY_CLIENT_ID,
+                    "client_secret": ANTIGRAVITY_CLIENT_SECRET,
                     "code_verifier": self._verifier,
                 },
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
@@ -2068,12 +2106,21 @@ class TokenManager:
             return token
         auth = AntigravityOAuth(proxy_url=self.proxy_url)
         auth_url = auth.get_auth_url()
-        print(f"\n{BOLD}Antigravity OAuth Authentication{NC}")
-        print("=" * 50)
+        print(f"\n{BOLD}Google Antigravity (Cloud Code Assist) OAuth{NC}")
+        print("=" * 60)
         print(f"  1. Open: {CYAN}{auth_url}{NC}")
-        code = input("  2. Paste authorization code: ").strip()
+        print(f"  2. Sign in with your Google account")
+        print(f"  3. After authorization, your browser redirects to")
+        print(f"     {ANTIGRAVITY_REDIRECT_URI}?code=...&state=...")
+        print(f"     Copy the FULL redirect URL and paste it below")
+        code = input(f"\n  {YELLOW}Paste redirect URL or authorization code: {NC}").strip()
         if code.startswith("http"):
-            code = parse_qs(urlparse(code).query).get("code", [""])[0]
+            parsed = urlparse(code)
+            qs = parse_qs(parsed.query)
+            code = qs.get("code", [""])[0]
+            returned_state = qs.get("state", [""])[0]
+            if returned_state and returned_state != auth._state:
+                print(f"  {RED}WARNING: OAuth state mismatch (possible CSRF). Proceeding anyway.{NC}")
         if not code:
             raise ValueError("No authorization code provided")
         token = await auth.exchange_code(code)
@@ -2177,13 +2224,13 @@ from radix_tree import RadixTreeRouter
 from circuits import HalfOpenCircuit, CircuitBreakerRegistry
 
 # -- Configuration -----------------------------------------------------------
-CONFIG_DIR = Path.home() / ".owl-agent" / "config"
-LOG_DIR = Path.home() / ".owl-agent" / "logs"
+INSTALL_DIR = Path(os.getenv("OWL_INSTALL_DIR", str(Path.home() / ".owl-agent")))
+CONFIG_DIR = INSTALL_DIR / "config"
+LOG_DIR = INSTALL_DIR / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 PROXY_URL = os.getenv("OWL_PROXY_URL", "http://127.0.0.1:60000")
 KIRO_API_KEY = os.getenv("KIRO_API_KEY", "kiro-gateway-8333")
-INSTALL_DIR = os.getenv("OWL_INSTALL_DIR", str(Path.home() / ".owl-agent"))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -2407,7 +2454,7 @@ class OrcaRouter:
                 logger.warning("Could not load providers.json: %s", e)
         return {
             "copilot": {"base_url": "https://api.githubcopilot.com", "format": "openai"},
-            "antigravity": {"base_url": "https://api.antigravity.ai", "format": "anthropic"},
+            "antigravity": {"base_url": "https://cloudcode-pa.googleapis.com", "format": "anthropic"},
             "kiro": {"base_url": "http://127.0.0.1:8333", "format": "openai"},
         }
 
@@ -2859,7 +2906,7 @@ if [ "${DRY_RUN:-}" != "true" ]; then
     }
   },
   "antigravity": {
-    "base_url": "https://api.antigravity.ai",
+    "base_url": "https://cloudcode-pa.googleapis.com",
     "format": "anthropic",
     "models": {
       "antigravity-flash": {"context_window": 100000, "max_tokens": 8192},
@@ -2965,11 +3012,11 @@ safe_service_action() {
             return 0
         else
             log_ok "$service_name is stopped. Safe to start."
-            systemctl --user "$action" "$service_name"
+            systemctl --user "$action" "$service_name" 2>/dev/null || true
         fi
     else
         log_ok "Executing $action on $service_name"
-        systemctl --user "$action" "$service_name"
+        systemctl --user "$action" "$service_name" 2>/dev/null || true
     fi
 }
 
@@ -3310,11 +3357,12 @@ if [ "${DRY_RUN:-}" != "true" ]; then
     # expansion inside Python code. Pass variables via environment instead.
     # FIX (F-10): Use state-machine JSONC parser from shared jsonc_utils
     # module instead of duplicating ~70 lines inline (B11).
-    FINAL_JSON=$(OWL_CFG="$OPENCODE_CONFIG" OWL_BLOCK="$NEW_CONFIG_BLOCK" python3 << 'PYEOF'
+    FINAL_JSON=$(OWL_CFG="$OPENCODE_CONFIG" OWL_BLOCK="$NEW_CONFIG_BLOCK" OWL_INSTALL_DIR="$INSTALL_DIR" python3 << 'PYEOF'
 import json, os, sys
 
 # Import shared JSONC utilities
-sys.path.insert(0, os.path.expanduser("~/.owl-agent/bin/utils"))
+_owl_install = os.environ.get("OWL_INSTALL_DIR", os.path.expanduser("~/.owl-agent"))
+sys.path.insert(0, os.path.join(_owl_install, "bin", "utils"))
 try:
     from jsonc_utils import load_jsonc
 except ImportError:
@@ -3607,7 +3655,7 @@ log_step 12 $TOTAL_STEPS "Safe activation"
 
 if [ "${DRY_RUN:-}" != "true" ]; then
     # Reload systemd definitions from disk (safe -- no connection impact)
-    systemctl --user daemon-reload
+    systemctl --user daemon-reload 2>/dev/null || log_warn "systemd user bus not available ('systemctl --user' failed). Services won't auto-start."
 
     # Enable services (safe -- just marks for auto-start)
     systemctl --user enable orca-router.service 2>/dev/null || true
@@ -3686,14 +3734,16 @@ if [ "${DRY_RUN:-}" != "true" ]; then
     log_info "Running post-activation health check..."
     if systemctl --user is-active --quiet orca-router.service 2>/dev/null; then
         HEALTH_OK=false
-        for attempt in $(seq 1 10); do
+        _attempt=0
+        while [ "$_attempt" -lt 10 ]; do
+            _attempt=$((_attempt + 1))
             HEALTH_RESP=$(curl -s --connect-timeout 3 http://127.0.0.1:60001/health 2>/dev/null || echo "TIMEOUT")
             if echo "$HEALTH_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if d.get('status')=='ok' else 1)" 2>/dev/null; then
                 HEALTH_OK=true
                 break
             fi
-            if [ "$attempt" -lt 10 ]; then
-                log_info "  Health check attempt $attempt/10 failed, retrying in 3s..."
+            if [ "$_attempt" -lt 10 ]; then
+                log_info "  Health check attempt $_attempt/10 failed, retrying in 3s..."
                 sleep 3
             fi
         done
@@ -3711,14 +3761,16 @@ if [ "${DRY_RUN:-}" != "true" ]; then
     if [ "${SKIP_KIRO:-}" != "true" ] && systemctl --user is-active --quiet kiro-gateway.service 2>/dev/null; then
         log_info "Running Kiro Gateway health check..."
         KIRO_HEALTH_OK=false
-        for attempt in $(seq 1 10); do
+        _kiro_attempt=0
+        while [ "$_kiro_attempt" -lt 10 ]; do
+            _kiro_attempt=$((_kiro_attempt + 1))
             KIRO_RESP=$(curl -s --connect-timeout 3 "http://127.0.0.1:${KIRO_PORT}/health" 2>/dev/null || echo "TIMEOUT")
             if echo "$KIRO_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if d.get('status')=='ok' or d.get('health')=='ok' else 1)" 2>/dev/null; then
                 KIRO_HEALTH_OK=true
                 break
             fi
-            if [ "$attempt" -lt 10 ]; then
-                log_info "  Kiro health check attempt $attempt/10 failed, retrying in 3s..."
+            if [ "$_kiro_attempt" -lt 10 ]; then
+                log_info "  Kiro health check attempt $_kiro_attempt/10 failed, retrying in 3s..."
                 sleep 3
             fi
         done
@@ -3739,6 +3791,11 @@ if [ "${DRY_RUN:-}" != "true" ]; then
     fi
 
     # -- Log Rotation Setup --------------------------------------------------
+    # Clean up backup files from previous install runs (older than 7 days)
+    cleanup_old_backups "$INSTALL_DIR" "*"
+    cleanup_old_backups "$CONFIG_DIR" "*"
+    cleanup_old_backups "$OPENCODE_DIR" "opencode.jsonc"
+
     log_info "Configuring log rotation..."
     if command -v logrotate &>/dev/null; then
         _ATMP="$CONFIG_DIR/logrotate.conf.owl_tmp_$(date +%s)_$$_$(od -An -N2 -tu2 /dev/urandom | tr -d ' ')"

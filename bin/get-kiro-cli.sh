@@ -47,6 +47,17 @@ curl -fSL --connect-timeout 15 --progress-bar -o "$TMP_TAR" "$URL" || {
 
 echo "Extracting..."
 tar -xzf "$TMP_TAR" -C "$KIRO_DIR/"
-chmod +x "$KIRO_DIR/kiro-cli" 2>/dev/null || true
+KIRO_BIN=$(find "$KIRO_DIR" -name "kiro-cli" -type f 2>/dev/null | head -1)
+if [ -n "$KIRO_BIN" ]; then
+    chmod +x "$KIRO_BIN"
+    ln -sf "$KIRO_BIN" "$HOME/.local/bin/kiro-cli"
+    for wrapper in kiro-cli-chat kiro-cli-term q qchat; do
+        WRAPPER_PATH=$(find "$KIRO_DIR" -name "$wrapper" -type f 2>/dev/null | head -1)
+        [ -n "$WRAPPER_PATH" ] && ln -sf "$WRAPPER_PATH" "$HOME/.local/bin/$wrapper" 2>/dev/null || true
+    done
+    echo "kiro-cli installed at $KIRO_BIN (symlinked to ~/.local/bin/)"
+else
+    echo "WARNING: kiro-cli binary not found after extraction"
+    echo "Files extracted to $KIRO_DIR/kirocli/"
+fi
 rm -f "$TMP_TAR"
-echo "kiro-cli installed at $KIRO_DIR/kiro-cli"

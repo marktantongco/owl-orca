@@ -45,3 +45,5 @@ next-env.d.ts
 web/node_modules/
 web/.next/
 web/out/
+deployed/
+bin/kirocli/
