@@ -439,6 +439,30 @@ owl-proxy curl https://api.example.com
 
 ---
 
+## 🌐 Landing Page (Web Frontend)
+
+This repo includes a **Next.js landing page** in the `web/` directory — a kinetic autopoiesis UI with stream racing visualization.
+
+### Quick Start
+
+```bash
+cd web
+bun install    # or npm install / yarn / pnpm
+bun dev        # opens http://localhost:3000
+```
+
+### Build for Production
+
+```bash
+cd web
+bun run build
+bun start      # production server on port 3000
+```
+
+The frontend shares the same `assets/` directory for architecture and feature images.
+
+---
+
 ## 🔐 Security Considerations
 
 - **Tokens encrypted at rest**: OAuth tokens stored in `tokens.enc` using Fernet symmetric encryption with auto-generated keys
