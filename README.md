@@ -496,7 +496,7 @@ systemctl --user reload orca-router.service
 
 This repo also contains the **OWL-ORCA landing page** — a mobile-first Next.js 16 app with Kinetic Autopoiesis UI, deployed on Vercel.
 
-**Live site**: [owl-orca-web.vercel.app](https://owl-orca-web.vercel.app)
+**Live site**: [owl-orca-web.vercel.app](https://owl-orca-web.vercel.app) *(will be updated after Vercel domain change)*
 
 ### Design System
 
