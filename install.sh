@@ -553,11 +553,18 @@ if [ "${DRY_RUN:-}" != "true" ]; then
 
     # FIX (P2-Retry): Add retry logic for pip install with exponential backoff.
     # Remove --quiet to show error output for diagnosis.
+    _SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
     PIP_RETRY=0
     while [ "$PIP_RETRY" -lt 3 ]; do
-        if "$VENV_DIR/bin/pip" install --no-cache-dir --upgrade pip 2>&1 && \
-           "$VENV_DIR/bin/pip" install --no-cache-dir "httpx[http2]" aiohttp aiofiles cryptography 2>&1; then
-            break
+        if "$VENV_DIR/bin/pip" install --no-cache-dir --upgrade pip 2>&1; then
+            if [ -f "$_SCRIPT_DIR/requirements.txt" ]; then
+                PIP_OK=false; "$VENV_DIR/bin/pip" install --no-cache-dir -r "$_SCRIPT_DIR/requirements.txt" 2>&1 && PIP_OK=true
+            else
+                PIP_OK=false; "$VENV_DIR/bin/pip" install --no-cache-dir "httpx[http2]" aiohttp aiofiles cryptography 2>&1 && PIP_OK=true
+            fi
+            if [ "$PIP_OK" = true ]; then
+                break
+            fi
         fi
         PIP_RETRY=$((PIP_RETRY + 1))
         if [ "$PIP_RETRY" -lt 3 ]; then
